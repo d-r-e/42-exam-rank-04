@@ -1,267 +1,176 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 
-#define SIDE_OUT	0
-#define SIDE_IN		1
+#define SIDE_IN 1
+#define SIDE_OUT 0
 
-#define STDIN		0
-#define STDOUT		1
-#define STDERR		2
+#define TYPE_END 0
+#define TYPE_PIPE 1
+#define TYPE_BREAK 2
 
-#define TYPE_END	0
-#define TYPE_PIPE	1
-#define TYPE_BREAK	2
+#define STDIN 0
+#define STDOUT 1
+#define STDERR 2
 
-#ifdef TEST_SH
-# define TEST		1
-#else
-# define TEST		0
-#endif
-
-typedef struct	s_list
+typedef struct s_list
 {
-	char			**args;
-	int				length;
-	int				type;
-	int				pipes[2];
-	struct s_list	*previous;
-	struct s_list	*next;
+	int length;
+	char **args;
+	struct s_list *prev;
+	struct s_list *next;
+	int type;
+	int			pipes[2];
 }				t_list;
 
-int ft_strlen(char const *str)
+int	ft_strlen(const char *s)
 {
-	int	i;
+	int i;
 
 	i = 0;
-	while (str[i])
+	while (s[i])
 		i++;
 	return (i);
 }
 
-int show_error(char const *str)
+int	errr(const char *s)
 {
-	if (str)
-		write(STDERR, str, ft_strlen(str));
+	write(STDOUT, s, ft_strlen(s));
 	return (EXIT_FAILURE);
 }
 
-int exit_fatal(void)
+char* ft_strdup(const char *s)
 {
-	show_error("error: fatal\n");
-	exit(EXIT_FAILURE);
-	return (EXIT_FAILURE);
-}
+	int i;
+	char *new;
 
-void *exit_fatal_ptr(void)
-{
-	exit_fatal();
-	exit(EXIT_FAILURE);
-	return (NULL);
-}
-
-char *ft_strdup(char const *str)
-{
-	char	*copy;
-	int		i;
-
-	if (!(copy = (char*)malloc(sizeof(*copy) * (ft_strlen(str) + 1))))
-		return (exit_fatal_ptr());
+	if (!s || !(new = malloc(sizeof(char) * (ft_strlen(s) + 1))))
+		return (NULL);
 	i = 0;
-	while (str[i])
+	while (s[i])
 	{
-		copy[i] = str[i];
+		new[i] = s[i];
 		i++;
 	}
-	copy[i] = 0;
-	return (copy);
+	new[i] = 0;
+	return (new);
 }
 
-int add_arg(t_list *cmd, char *arg)
+int add_arg(t_list *cmds, char *arg)
 {
-	char	**tmp;
-	int		i;
+	char **tmp;
+	int i;
 
+	if (!(tmp = malloc(sizeof(char*) * (cmds->length + 2))))
+		exit(errr("oh no\n"));
 	i = 0;
-	tmp = NULL;
-	if (!(tmp = (char**)malloc(sizeof(*tmp) * (cmd->length + 2))))
-		return (exit_fatal());
-	while (i < cmd->length)
+	while (i < cmds->length)
 	{
-		tmp[i] = cmd->args[i];
+		tmp[i] = cmds->args[i];
 		i++;
 	}
-	if (cmd->length > 0)
-		free(cmd->args);
-	cmd->args = tmp;
-	cmd->args[i++] = ft_strdup(arg);
-	cmd->args[i] = 0;
-	cmd->length++;
+	tmp[i] = ft_strdup(arg);
+	i++;
+	tmp[i] = 0;
+	if (cmds->length > 0)
+		free(cmds->args);
+	cmds->args = tmp;
+	cmds->length++;
 	return (EXIT_SUCCESS);
 }
 
-int list_push(t_list **list, char *arg)
+int push(t_list **cmds, char *arg)
 {
-	t_list	*new;
+	t_list *new;
 
-	if (!(new = (t_list*)malloc(sizeof(*new))))
-		return (exit_fatal());
+	if (!(new = (t_list*)malloc(sizeof(t_list))))
+		exit(errr("oh no\n"));
 	new->args = NULL;
 	new->length = 0;
-	new->type = TYPE_END;
-	new->previous = NULL;
+	new->prev = NULL;
 	new->next = NULL;
-	if (*list)
+	new->type = TYPE_END;
+	if (*cmds)
 	{
-		(*list)->next = new;
-		new->previous = *list;
+		(*cmds)->next = new;
+		new->prev = *cmds;
 	}
-	*list = new;
-	return (add_arg(new, arg));
+	*cmds = new;
+	return (add_arg(*cmds, arg));
 }
 
-int list_rewind(t_list **list)
+int parse_args(t_list **cmds, char *arg)
 {
-	while (*list && (*list)->previous)
-		*list = (*list)->previous;
-	return (EXIT_SUCCESS);
-}
+	int isbreak;
+	int ispipe;
 
-int list_clear(t_list **cmds)
-{
-	t_list	*tmp;
-	int		i;
-
-	list_rewind(cmds);
-	while (*cmds)
-	{
-		tmp = (*cmds)->next;
-		i = 0;
-		while (i < (*cmds)->length)
-			free((*cmds)->args[i++]);
-		free((*cmds)->args);
-		free(*cmds);
-		*cmds = tmp;
-	}
-	*cmds = NULL;
-	return (EXIT_SUCCESS);
-}
-
-int parse_arg(t_list **cmds, char *arg)
-{
-	int	is_break;
-
-	is_break = (strcmp(";", arg) == 0);
-	if (is_break && !*cmds)
+	isbreak = (strcmp(";", arg) == 0);
+	ispipe = (strcmp("|", arg) == 0);
+	if (isbreak && !*cmds) // "primer arg es un ;
 		return (EXIT_SUCCESS);
-	else if (!is_break && (!*cmds || (*cmds)->type > TYPE_END))
-		return (list_push(cmds, arg));
-	else if (strcmp("|", arg) == 0)
+	else if (!isbreak && (!*cmds || (*cmds)->type > TYPE_END))
+		return (push(cmds, arg));
+		//primer arg o hemos llegado a ; o |
+	else if (ispipe)
 		(*cmds)->type = TYPE_PIPE;
-	else if (is_break)
+	else if (isbreak)
 		(*cmds)->type = TYPE_BREAK;
 	else
-		return (add_arg(*cmds, arg));
+		add_arg(*cmds, arg);
 	return (EXIT_SUCCESS);
 }
 
-int exec_cmd(t_list *cmd, char **env)
+void
+	rewind_lst(t_list **lst)
 {
-	pid_t	pid;
-	int		ret;
-	int		status;
-	int		pipe_open;
-
-	ret = EXIT_FAILURE;
-	pipe_open = 0;
-	if (cmd->type == TYPE_PIPE || (cmd->previous && cmd->previous->type == TYPE_PIPE))
-	{
-		pipe_open = 1;
-		if (pipe(cmd->pipes))
-			return (exit_fatal());
-	}
-	pid = fork();
-	if (pid < 0)
-		return (exit_fatal());
-	else if (pid == 0)
-	{
-		if (cmd->type == TYPE_PIPE
-			&& dup2(cmd->pipes[SIDE_IN], STDOUT) < 0)
-			return (exit_fatal());
-		if (cmd->previous && cmd->previous->type == TYPE_PIPE
-			&& dup2(cmd->previous->pipes[SIDE_OUT], STDIN) < 0)
-			return (exit_fatal());
-		if ((ret = execve(cmd->args[0], cmd->args, env)) < 0)
-		{
-			show_error("error: cannot execute ");
-			show_error(cmd->args[0]);
-			show_error("\n");
-		}
-		exit(ret);
-	}
-	else
-	{
-		waitpid(pid, &status, 0);
-		if (pipe_open)
-		{
-			close(cmd->pipes[SIDE_IN]);
-			if (!cmd->next || cmd->type == TYPE_BREAK)
-				close(cmd->pipes[SIDE_OUT]);
-		}
-		if (cmd->previous && cmd->previous->type == TYPE_PIPE)
-			close(cmd->previous->pipes[SIDE_OUT]);
-		if (WIFEXITED(status))
-			ret = WEXITSTATUS(status);
-	}
-	return (ret);
+	while (*lst && (*lst)->prev)
+		*lst = ((*lst)->prev);
 }
 
-int exec_cmds(t_list **cmds, char **env)
+int exec_cmds(t_list **cmds, char **envp)
 {
-	t_list	*crt;
-	int		ret;
+	t_list *crt;
+	int ret;
 
+	crt = *cmds;
 	ret = EXIT_SUCCESS;
-	list_rewind(cmds);
-	while (*cmds)
+	while (crt)
 	{
-		crt = *cmds;
 		if (strcmp("cd", crt->args[0]) == 0)
 		{
-			ret = EXIT_SUCCESS;
+			printf("%s: %s\n", crt->args[0], crt->args[1]);
 			if (crt->length < 2)
-				ret = show_error("error: cd: bad arguments\n");
-			else if (chdir(crt->args[1]))
+				ret = errr("error: bad arguments\n");
+			else if (chdir(crt->args[1]) != 0)
 			{
-				ret = show_error("error: cd: cannot change directory to ");
-				show_error(crt->args[1]);
-				show_error("\n");
+				ret = errr("error: cd: cannot change directory to ");
+				errr(crt->args[1]);
+				errr("\n");
 			}
 		}
-		else
-			ret = exec_cmd(crt, env);
-		if (!(*cmds)->next)
-			break ;
-		*cmds = (*cmds)->next;
+		crt = crt->next;
 	}
+	(void)envp;
 	return (ret);
 }
 
-int main(int argc, char **argv, char **env)
+int	main(int argc, char **argv, char **envp)
 {
-	t_list	*cmds;
-	int		i;
-	int		ret;
+	t_list *cmds;
+	int i;
+	int ret;
 
-	ret = EXIT_SUCCESS;
+	i = 0;
 	cmds = NULL;
-	i = 1;
-	while (i < argc)
-		parse_arg(&cmds, argv[i++]);
+	ret = EXIT_SUCCESS;
+	while (argv[++i])
+		parse_args(&cmds, argv[i]);
 	if (cmds)
-		ret = exec_cmds(&cmds, env);
-	list_clear(&cmds);
-	if (TEST)
-		while (1);
+	{
+		rewind_lst(&cmds);
+		ret = exec_cmds(&cmds, envp);
+	}
+	(void)argc, (void)argv, (void)envp, (void)cmds;
 	return (ret);
 }
